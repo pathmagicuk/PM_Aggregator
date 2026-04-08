@@ -1,4 +1,3 @@
-import os
 import time
 import json
 import requests
@@ -10,62 +9,51 @@ import matplotlib.dates as mdates
 DATA_FILE = "kvt_price_history.jsonl"
 POLL_INTERVAL_SEC = 30
 
-def get_coingecko_kvt():
-    """Get KVT prices from CoinGecko (main pairs)"""
+def get_coingecko_data():
     try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
-            "ids": "kinesis-velocity-token",
+            "ids": "kinesis-velocity-token,gold,silver,tether",
             "vs_currencies": "usd",
-            "include_market_cap": "false",
-            "include_24hr_vol": "true",
             "include_24hr_change": "true"
         }
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            kvt_usd = data.get("kinesis-velocity-token", {}).get("usd", 0)
             return {
-                "timestamp": datetime.utcnow().isoformat(),
-                "kvt_usd": kvt_usd,
-                "kvt_24h_change": data.get("kinesis-velocity-token", {}).get("usd_24h_change", 0)
+                "timestamp": datetime.now().isoformat(),
+                "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 0)),
+                "gold_usd": float(data.get("gold", {}).get("usd", 0)),
+                "silver_usd": float(data.get("silver", {}).get("usd", 0)),
+                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0)),   # C1USD is pegged to USD
             }
     except Exception as e:
         print(f"CoinGecko error: {e}")
-    return {"timestamp": datetime.utcnow().isoformat(), "kvt_usd": 450.0, "kvt_24h_change": 0}
-
-def get_metals_spot():
-    """Gold and Silver spot from metals.live"""
-    try:
-        gold = requests.get("https://api.metals.live/v1/gold", timeout=5).json()
-        silver = requests.get("https://api.metals.live/v1/silver", timeout=5).json()
-        return {
-            "gold_spot": float(gold[0]["price"]),
-            "silver_spot": float(silver[0]["price"])
-        }
-    except:
-        return {"gold_spot": 2650.0, "silver_spot": 73.18}
+    
+    # Fallback values
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "kvt_usd": 472.0,
+        "gold_usd": 2650.0,
+        "silver_usd": 73.18,
+        "c1usd_usd": 1.0,
+    }
 
 def main_collector():
-    print("🚀 Starting KVT + Spot collector (CoinGecko + metals.live)")
+    print("🚀 Starting KVT + C1USD + Spot Gold + Spot Silver collector")
+    print("Polling every 30 seconds from CoinGecko")
     while True:
-        kvt = get_coingecko_kvt()
-        metals = get_metals_spot()
-
-        entry = {
-            "timestamp": kvt["timestamp"],
-            "kvt_usd": kvt["kvt_usd"],
-            "gold_spot": metals["gold_spot"],
-            "silver_spot": metals["silver_spot"]
-        }
+        data = get_coingecko_data()
+        now = datetime.now()
 
         with open(DATA_FILE, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+            f.write(json.dumps(data) + "\n")
 
-        print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] "
-              f"KVT/USD: ${kvt['kvt_usd']:.2f} | "
-              f"Gold: ${metals['gold_spot']:.2f} | "
-              f"Silver: ${metals['silver_spot']:.4f}")
+        print(f"[{now.strftime('%H:%M:%S')}] "
+              f"KVT: ${data['kvt_usd']:.2f} | "
+              f"C1USD: ${data['c1usd_usd']:.4f} | "
+              f"Gold: ${data['gold_usd']:.2f} | "
+              f"Silver: ${data['silver_usd']:.4f}")
 
         time.sleep(POLL_INTERVAL_SEC)
 
