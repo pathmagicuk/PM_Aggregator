@@ -11,9 +11,10 @@ POLL_INTERVAL_SEC = 30
 
 def get_coingecko_data():
     try:
+        # Use the correct approach for metals on CoinGecko
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
-            "ids": "kinesis-velocity-token,gold,silver,tether",
+            "ids": "kinesis-velocity-token,tether,gold,silver",
             "vs_currencies": "usd",
             "include_24hr_change": "true"
         }
@@ -23,9 +24,9 @@ def get_coingecko_data():
             return {
                 "timestamp": datetime.now().isoformat(),
                 "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 0)),
+                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0)),
                 "gold_usd": float(data.get("gold", {}).get("usd", 0)),
                 "silver_usd": float(data.get("silver", {}).get("usd", 0)),
-                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0)),   # C1USD is pegged to USD
             }
     except Exception as e:
         print(f"CoinGecko error: {e}")
@@ -34,14 +35,14 @@ def get_coingecko_data():
     return {
         "timestamp": datetime.now().isoformat(),
         "kvt_usd": 472.0,
+        "c1usd_usd": 1.0,
         "gold_usd": 2650.0,
         "silver_usd": 73.18,
-        "c1usd_usd": 1.0,
     }
 
 def main_collector():
-    print("🚀 Starting KVT + C1USD + Spot Gold + Spot Silver collector")
-    print("Polling every 30 seconds from CoinGecko")
+    print("🚀 Starting KVT + C1USD + Gold + Silver collector (CoinGecko)")
+    print("Polling every 30 seconds")
     while True:
         data = get_coingecko_data()
         now = datetime.now()
