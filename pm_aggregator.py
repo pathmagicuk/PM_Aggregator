@@ -3,71 +3,83 @@ import json
 import requests
 from datetime import datetime
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
-DATA_FILE = "price_history.jsonl"
-POLL_INTERVAL_SEC = 30
+DATA_FILE = "kinesis_arbitrage_history.jsonl"
+POLL_INTERVAL_SEC = 60  # Safer for free tiers
 
-def get_metals_spot():
-    """Gold and Silver from a more reliable free API"""
-    try:
-        # Free metalpriceapi.com (no key needed for basic use)
-        gold = requests.get("https://metalpriceapi.com/api/latest?base=USD&currencies=XAU", timeout=8).json()
-        silver = requests.get("https://metalpriceapi.com/api/latest?base=USD&currencies=XAG", timeout=8).json()
-        
-        gold_price = float(gold.get("rates", {}).get("XAU", 2650))
-        silver_price = float(silver.get("rates", {}).get("XAG", 73.18))
-        
-        return {
-            "gold_usd": gold_price,
-            "silver_usd": silver_price
-        }
-    except Exception as e:
-        print(f"Metalpriceapi error: {e}")
-        return {"gold_usd": 2650.0, "silver_usd": 73.18}
-
-def get_coingecko_kvt_c1usd():
+def get_coingecko_prices():
+    """One call for KVT + KAU + KAG + USDT"""
     try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
-            "ids": "kinesis-velocity-token,tether",
-            "vs_currencies": "usd"
+            "ids": "kinesis-velocity-token,kinesis-gold,kinesis-silver,tether",
+            "vs_currencies": "usd",
+            "include_24hr_change": "true"
         }
-        resp = requests.get(url, params=params, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            return {
-                "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 472.0)),
-                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0))
-            }
-    except:
-        pass
-    return {"kvt_usd": 472.0, "c1usd_usd": 1.0}
+        headers = {"User-Agent": "PM_Aggregator_TradingBot/2.1"}
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return {
+            "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 0)),
+            "kau_usd": float(data.get("kinesis-gold", {}).get("usd", 0)),
+            "kag_usd": float(data.get("kinesis-silver", {}).get("usd", 0)),
+            "usdt_usd": float(data.get("tether", {}).get("usd", 1.0))
+        }
+    except Exception as e:
+        print(f"CoinGecko error: {e}")
+        return {"kvt_usd": 0, "kau_usd": 0, "kag_usd": 0, "usdt_usd": 1.0}
+
+def get_metals_spot():
+    """TODO: Add your metalpriceapi key here or switch source"""
+    try:
+        # Replace with your key once registered
+        api_key = "YOUR_METALPRICEAPI_KEY_HERE"  
+        url = f"https://metalpriceapi.com/api/latest?base=USD&currencies=XAU,XAG&api_key={api_key}"
+        resp = requests.get(url, timeout=8)
+        data = resp.json()
+        return {
+            "gold_usd": float(data.get("rates", {}).get("XAU", 0)),
+            "silver_usd": float(data.get("rates", {}).get("XAG", 0))
+        }
+    except Exception as e:
+        print(f"Metals API error: {e} → Using CoinGecko KAU/KAG as proxy for now")
+        return {"gold_usd": 0, "silver_usd": 0}
 
 def main_collector():
-    print("🚀 Starting hybrid price collector (CoinGecko + metalpriceapi)")
+    print("🚀 Kinesis Arbitrage Collector v2.1 (KVT/KAU/KAG ratios ready for MA signals)")
+    print("Goal: Historical backtest + forward moving average arbitrage detection")
+    
     while True:
+        cg = get_coingecko_prices()
         metals = get_metals_spot()
-        kvt_data = get_coingecko_kvt_c1usd()
-        now = datetime.now()
+        now = datetime.utcnow()
+
+        kvt_kau = round(cg["kvt_usd"] / cg["kau_usd"], 6) if cg["kau_usd"] > 0 else 0
+        kvt_kag = round(cg["kvt_usd"] / cg["kag_usd"], 6) if cg["kag_usd"] > 0 else 0
 
         entry = {
             "timestamp": now.isoformat(),
-            "kvt_usd": kvt_data["kvt_usd"],
-            "c1usd_usd": kvt_data["c1usd_usd"],
-            "gold_usd": metals["gold_usd"],
-            "silver_usd": metals["silver_usd"]
+            "kvt_usd": cg["kvt_usd"],
+            "kau_usd": cg["kau_usd"],
+            "kag_usd": cg["kag_usd"],
+            "gold_spot_usd": metals["gold_usd"],
+            "silver_spot_usd": metals["silver_usd"],
+            "kvt_kau_ratio": kvt_kau,
+            "kvt_kag_ratio": kvt_kag,
+            "usdt_usd": cg["usdt_usd"]
         }
 
-        with open(DATA_FILE, "a") as f:
+        with open(DATA_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        print(f"[{now.strftime('%H:%M:%S')}] "
-              f"KVT: ${kvt_data['kvt_usd']:.2f} | "
-              f"C1USD: ${kvt_data['c1usd_usd']:.4f} | "
-              f"Gold: ${metals['gold_usd']:.2f} | "
-              f"Silver: ${metals['silver_usd']:.4f}")
+        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+              f"KVT ${cg['kvt_usd']:.2f} | "
+              f"KAU ${cg['kau_usd']:.2f} | "
+              f"KAG ${cg['kag_usd']:.2f} | "
+              f"KVT/KAU {kvt_kau:.5f} | "
+              f"KVT/KAG {kvt_kag:.5f}")
 
         time.sleep(POLL_INTERVAL_SEC)
 
