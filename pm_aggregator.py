@@ -10,20 +10,24 @@ DATA_FILE = "price_history.jsonl"
 POLL_INTERVAL_SEC = 30
 
 def get_metals_spot():
-    """Gold and Silver from metals.live (same as your aggregator)"""
+    """Gold and Silver from a more reliable free API"""
     try:
-        gold = requests.get("https://api.metals.live/v1/gold", timeout=5).json()
-        silver = requests.get("https://api.metals.live/v1/silver", timeout=5).json()
+        # Free metalpriceapi.com (no key needed for basic use)
+        gold = requests.get("https://metalpriceapi.com/api/latest?base=USD&currencies=XAU", timeout=8).json()
+        silver = requests.get("https://metalpriceapi.com/api/latest?base=USD&currencies=XAG", timeout=8).json()
+        
+        gold_price = float(gold.get("rates", {}).get("XAU", 2650))
+        silver_price = float(silver.get("rates", {}).get("XAG", 73.18))
+        
         return {
-            "gold_usd": float(gold[0]["price"]),
-            "silver_usd": float(silver[0]["price"])
+            "gold_usd": gold_price,
+            "silver_usd": silver_price
         }
     except Exception as e:
-        print(f"Metals.live error: {e}")
+        print(f"Metalpriceapi error: {e}")
         return {"gold_usd": 2650.0, "silver_usd": 73.18}
 
 def get_coingecko_kvt_c1usd():
-    """KVT and C1USD from CoinGecko"""
     try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
@@ -42,7 +46,7 @@ def get_coingecko_kvt_c1usd():
     return {"kvt_usd": 472.0, "c1usd_usd": 1.0}
 
 def main_collector():
-    print("🚀 Starting hybrid price collector (metals.live + CoinGecko)")
+    print("🚀 Starting hybrid price collector (CoinGecko + metalpriceapi)")
     while True:
         metals = get_metals_spot()
         kvt_data = get_coingecko_kvt_c1usd()
