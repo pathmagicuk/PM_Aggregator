@@ -6,55 +6,64 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-DATA_FILE = "kvt_price_history.jsonl"
+DATA_FILE = "price_history.jsonl"
 POLL_INTERVAL_SEC = 30
 
-def get_coingecko_data():
+def get_metals_spot():
+    """Gold and Silver from metals.live (same as your aggregator)"""
     try:
-        # Use the correct approach for metals on CoinGecko
+        gold = requests.get("https://api.metals.live/v1/gold", timeout=5).json()
+        silver = requests.get("https://api.metals.live/v1/silver", timeout=5).json()
+        return {
+            "gold_usd": float(gold[0]["price"]),
+            "silver_usd": float(silver[0]["price"])
+        }
+    except Exception as e:
+        print(f"Metals.live error: {e}")
+        return {"gold_usd": 2650.0, "silver_usd": 73.18}
+
+def get_coingecko_kvt_c1usd():
+    """KVT and C1USD from CoinGecko"""
+    try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
-            "ids": "kinesis-velocity-token,tether,gold,silver",
-            "vs_currencies": "usd",
-            "include_24hr_change": "true"
+            "ids": "kinesis-velocity-token,tether",
+            "vs_currencies": "usd"
         }
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             return {
-                "timestamp": datetime.now().isoformat(),
-                "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 0)),
-                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0)),
-                "gold_usd": float(data.get("gold", {}).get("usd", 0)),
-                "silver_usd": float(data.get("silver", {}).get("usd", 0)),
+                "kvt_usd": float(data.get("kinesis-velocity-token", {}).get("usd", 472.0)),
+                "c1usd_usd": float(data.get("tether", {}).get("usd", 1.0))
             }
-    except Exception as e:
-        print(f"CoinGecko error: {e}")
-    
-    # Fallback values
-    return {
-        "timestamp": datetime.now().isoformat(),
-        "kvt_usd": 472.0,
-        "c1usd_usd": 1.0,
-        "gold_usd": 2650.0,
-        "silver_usd": 73.18,
-    }
+    except:
+        pass
+    return {"kvt_usd": 472.0, "c1usd_usd": 1.0}
 
 def main_collector():
-    print("🚀 Starting KVT + C1USD + Gold + Silver collector (CoinGecko)")
-    print("Polling every 30 seconds")
+    print("🚀 Starting hybrid price collector (metals.live + CoinGecko)")
     while True:
-        data = get_coingecko_data()
+        metals = get_metals_spot()
+        kvt_data = get_coingecko_kvt_c1usd()
         now = datetime.now()
 
+        entry = {
+            "timestamp": now.isoformat(),
+            "kvt_usd": kvt_data["kvt_usd"],
+            "c1usd_usd": kvt_data["c1usd_usd"],
+            "gold_usd": metals["gold_usd"],
+            "silver_usd": metals["silver_usd"]
+        }
+
         with open(DATA_FILE, "a") as f:
-            f.write(json.dumps(data) + "\n")
+            f.write(json.dumps(entry) + "\n")
 
         print(f"[{now.strftime('%H:%M:%S')}] "
-              f"KVT: ${data['kvt_usd']:.2f} | "
-              f"C1USD: ${data['c1usd_usd']:.4f} | "
-              f"Gold: ${data['gold_usd']:.2f} | "
-              f"Silver: ${data['silver_usd']:.4f}")
+              f"KVT: ${kvt_data['kvt_usd']:.2f} | "
+              f"C1USD: ${kvt_data['c1usd_usd']:.4f} | "
+              f"Gold: ${metals['gold_usd']:.2f} | "
+              f"Silver: ${metals['silver_usd']:.4f}")
 
         time.sleep(POLL_INTERVAL_SEC)
 
