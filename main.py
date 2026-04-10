@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 
 DATA_FILE = "kinesis_arbitrage_history.jsonl"
 POLL_INTERVAL_SEC = 60
-ANALYZER_INTERVAL = 180   # every 3 minutes (balanced)
+ANALYZER_INTERVAL = 180   # every 3 minutes
 
 def get_coingecko_prices():
     try:
@@ -54,22 +54,24 @@ def run_analyzer():
         print(f"Analyzer: {len(data)} total records")
 
         if len(data) < 20:
-            print(f"Need more data ({len(data)}/20) for reliable MA signals")
+            print(f"Need more data ({len(data)}/20) for MA signals")
             return
 
         df = pd.DataFrame(data)
         df = df.set_index("timestamp")
         df = df.sort_index()
 
-        # Fixed: use iloc for last N hours instead of .last()
-        cutoff = df.index.max() - pd.Timedelta(hours=48)
-        recent = df[df.index >= cutoff].copy()
+        # Use integer rolling windows (robust for irregular data)
+        window_60 = 60   # ~60 minutes worth of points
+        window_short = 5
 
-        recent["kvt_kau_ma60"] = recent["kvt_kau_ratio"].rolling("60T").mean()
-        recent["kvt_kag_ma60"] = recent["kvt_kag_ratio"].rolling("60T").mean()
+        recent = df.copy()  # Use all available for now (or slice last 48H if you prefer)
 
-        recent["kvt_kau_z"] = (recent["kvt_kau_ratio"] - recent["kvt_kau_ma60"]) / recent["kvt_kau_ratio"].rolling("60T").std()
-        recent["kvt_kag_z"] = (recent["kvt_kag_ratio"] - recent["kvt_kag_ma60"]) / recent["kvt_kag_ratio"].rolling("60T").std()
+        recent["kvt_kau_ma60"] = recent["kvt_kau_ratio"].rolling(window=window_60, min_periods=10).mean()
+        recent["kvt_kag_ma60"] = recent["kvt_kag_ratio"].rolling(window=window_60, min_periods=10).mean()
+
+        recent["kvt_kau_z"] = (recent["kvt_kau_ratio"] - recent["kvt_kau_ma60"]) / recent["kvt_kau_ratio"].rolling(window=window_60, min_periods=10).std()
+        recent["kvt_kag_z"] = (recent["kvt_kag_ratio"] - recent["kvt_kag_ma60"]) / recent["kvt_kag_ratio"].rolling(window=window_60, min_periods=10).std()
 
         recent["signal"] = "HOLD"
         recent.loc[(recent["kvt_kau_z"] < -1.5) & (recent["kvt_kag_z"] < -1.0), "signal"] = "STRONG BUY KVT"
@@ -83,7 +85,7 @@ def run_analyzer():
         print(f"Analyzer error: {e}")
 
 # ====================== MAIN ======================
-print("🚀 Combined Kinesis Collector + Analyzer v1.3 - Fixed")
+print("🚀 Combined Kinesis Collector + Analyzer v1.4 - Stable MA")
 print(f"Data file: {os.path.abspath(DATA_FILE)}")
 
 with open(DATA_FILE, "w", encoding="utf-8") as f:
