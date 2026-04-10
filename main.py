@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 
 DATA_FILE = "kinesis_arbitrage_history.jsonl"
 POLL_INTERVAL_SEC = 60
-ANALYZER_INTERVAL = 120   # every 2 minutes
+ANALYZER_INTERVAL = 180   # every 3 minutes (balanced)
 
 def get_coingecko_prices():
     try:
@@ -61,8 +61,9 @@ def run_analyzer():
         df = df.set_index("timestamp")
         df = df.sort_index()
 
-        # Use .last() correctly on DatetimeIndex
-        recent = df.last("48H")
+        # Fixed: use iloc for last N hours instead of .last()
+        cutoff = df.index.max() - pd.Timedelta(hours=48)
+        recent = df[df.index >= cutoff].copy()
 
         recent["kvt_kau_ma60"] = recent["kvt_kau_ratio"].rolling("60T").mean()
         recent["kvt_kag_ma60"] = recent["kvt_kag_ratio"].rolling("60T").mean()
@@ -82,10 +83,9 @@ def run_analyzer():
         print(f"Analyzer error: {e}")
 
 # ====================== MAIN ======================
-print("🚀 Combined Kinesis Collector + Analyzer v1.2")
+print("🚀 Combined Kinesis Collector + Analyzer v1.3 - Fixed")
 print(f"Data file: {os.path.abspath(DATA_FILE)}")
 
-# Start fresh
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     f.write("")
 
@@ -116,7 +116,6 @@ while True:
     else:
         print(f"[{now.strftime('%H:%M:%S UTC')}] Skipped (rate limit)")
 
-    # Run analyzer every 2 minutes
     if time.time() - last_analyzer > ANALYZER_INTERVAL:
         print("\n--- Running Analyzer ---")
         run_analyzer()
